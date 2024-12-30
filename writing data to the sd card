@@ -13,6 +13,9 @@ FATFS fatfs;       // File system object
 FIL file;          // File object
 FIL counter_file;  // File to store the counter
 
+/*this code create 2 files, the first file is a text file in order to count the files and change the name of the file to be created and by that we each time create a new file and not over write the same file.
+the second file is an excel file with 3 columns: adress,data, type (analog/digital) the data that is received from the bram is written to the excel file. write now the type s changing every address and the data is sent by VIO ip block */ 
+
 int main()
 {
     init_platform();
