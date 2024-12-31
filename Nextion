@@ -1,0 +1,60 @@
+#include <stdio.h>
+#include "platform.h"
+#include "xil_printf.h"
+#include "xparameters.h"
+#include "xuartlite.h"
+
+#define UARTLITE_DEVICE_ID XPAR_AXI_UARTLITE_0_DEVICE_ID
+
+XUartLite UartLite;
+
+// Function to initialize the AXI UART Lite
+int InitializeUART() {
+    int status = XUartLite_Initialize(&UartLite, UARTLITE_DEVICE_ID);
+    if (status != XST_SUCCESS) {
+        xil_printf("UART initialization failed!\n");
+        return XST_FAILURE;
+    }
+    xil_printf("UART initialized successfully.\n");
+    return XST_SUCCESS;
+}
+
+int main() {
+    init_platform();
+
+    print("Check, start communication\n\r");
+
+    // Initialize UART Lite
+    if (InitializeUART() != XST_SUCCESS) {
+        return XST_FAILURE;
+    }
+
+    int data_digital;
+    while (1) {
+    xil_printf("Enter data:\n");
+    scanf("%d", &data_digital); //receive data from the user
+
+    char command_digital[50];
+    sprintf(command_digital, "digital.val=%d", data_digital); //convert the data into string
+
+    // Send command string
+    XUartLite_Send(&UartLite, (u8 *)command_digital, strlen(command_digital)); //send the data
+    xil_printf("Sending data to the Nextion: %s\n", command_digital);
+
+
+    // Wait for the command to be fully transmitted
+    while (XUartLite_IsSending(&UartLite));
+
+    // Send the end of the command (this command is required)
+    u8 end_cmd[3] = {0xFF, 0xFF, 0xFF};
+    XUartLite_Send(&UartLite, end_cmd, sizeof(end_cmd)); //send the end of the packet
+
+    // Wait for the end command to be fully transmitted
+    while (XUartLite_IsSending(&UartLite));
+
+    xil_printf("The data is sent.\n");
+
+    }
+    cleanup_platform();
+    return 0;
+}
