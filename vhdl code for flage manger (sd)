@@ -1,0 +1,62 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity flags_maneger is
+    Port (
+        clk           : in  STD_LOGIC;         -- Clock input
+        i_data        : in  STD_LOGIC_VECTOR(31 downto 0); -- FIFO data output
+        bram_addr     : out STD_LOGIC_VECTOR(31 downto 0); -- BRAM address
+        bram_din      : out STD_LOGIC_VECTOR(31 downto 0); -- BRAM data input
+        bram_we       : out std_logic_vector (3 downto 0);
+        o_bram_ena    : out std_logic;
+       o_bram_rst     : out std_logic
+    );
+end flags_maneger;
+
+architecture Behavioral of flags_maneger is
+    signal s_addr_counter : unsigned(31 downto 0) := (others => '0'); -- Address counter starting at 0x4000_0000
+    signal s_shiftreg_data : STD_LOGIC_VECTOR(31 downto 0):=(others => '0');
+    signal s_current_data :std_logic_vector(31 downto 0):=(others => '0'); 
+    
+    type state_type is (idle, pulse, prepare_write, assert_write);
+    signal state : state_type := idle;
+    
+    
+begin
+    process (clk)
+    begin
+           
+        if rising_edge(clk) then
+            case state is
+                when idle =>
+                --o_current_state<= "00";
+                    bram_we <= "0000";
+                    s_shiftreg_data <= i_data; -- store data to be sent 
+                    state <= pulse;
+                    
+                when pulse =>   
+                    if (s_current_data /= s_shiftreg_data) then 
+                        state <= prepare_write;
+                    else 
+                        state <= idle;
+                    end if;
+                    
+                when prepare_write =>
+                --o_current_state <= "10";
+                    bram_din <= s_shiftreg_data; -- Assign FIFO data to BRAM input
+                    bram_addr <= std_logic_vector(s_addr_counter); -- Assign address to BRAM
+                    s_current_data <= s_shiftreg_data;                   
+                    state <= assert_write;  -- Return to IDLE state for the next read/write cycle
+                    
+                when assert_write => --this state is for asserting the we one clock sycle after    
+                    bram_we <= "1111";                
+                    s_addr_counter <= s_addr_counter + 4; -- Increment address counter
+                    state <= idle;
+                   
+            end case;
+        end if;
+    end process;
+    o_bram_ena <= '1';
+    o_bram_rst <= '0';
+end Behavioral;
