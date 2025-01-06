@@ -15,6 +15,9 @@ XGpio Gpio;
 // Variable to hold the current LED state (0 = OFF, 1 = ON)
 static int led_state = 0;
 
+// Flag to indicate a button press
+static int button_pressed = 0;
+
 // Function to initialize the AXI UART Lite
 int InitializeUART() {
     int status = XUartLite_Initialize(&UartLite, UARTLITE_DEVICE_ID);
@@ -38,7 +41,6 @@ int InitializeGPIO() {
     return XST_SUCCESS;
 }
 
-
 // Function to handle received data and control the LED
 void HandleReceivedData(u8 *rx_buffer, int length) {
     xil_printf("Received data: ");
@@ -48,24 +50,25 @@ void HandleReceivedData(u8 *rx_buffer, int length) {
     xil_printf("\n");
 
     // Check if the received data corresponds to the button press
-    if (length >= 1 && rx_buffer[0] == 0x80) {
+    if (length >= 1 && rx_buffer[0] == 0x80 && !button_pressed) {
         xil_printf("Button pressed! Toggling LED state.\n");
         led_state = !led_state;
         XGpio_DiscreteWrite(&Gpio, LED_CHANNEL, led_state);
-    } else {
-        xil_printf("Unknown data or no button press detected.\n");
+        button_pressed = 1; // Mark the button as pressed
     }
 }
 
+// Function to receive data in the background
 void ReceiveData() {
     u8 rx_buffer[4]; // Buffer to store received data
     int receive_cnt = 0;
 
-    xil_printf("Waiting for data...\n");
-    while (receive_cnt < 1) { // Expecting 1 byte (0x80)
+    // Check for data from the UART Lite
+    while (receive_cnt < 1) {
         receive_cnt += XUartLite_Recv(&UartLite, &rx_buffer[receive_cnt], 1);
     }
 
+    // Process the received data
     HandleReceivedData(rx_buffer, receive_cnt);
 }
 
@@ -78,26 +81,25 @@ void TransmitData() {
     // Format the main part of the command
     sprintf(command_digital, "digital.val=%d", data_digital);
 
-
+    // Send the data to the Nextion display
     XUartLite_Send(&UartLite, (u8 *)command_digital, strlen(command_digital)); //send the data
     xil_printf("Sending data to the Nextion: %s\n", command_digital);
 
     // Wait for the command to be fully transmitted
-        while (XUartLite_IsSending(&UartLite));
+    while (XUartLite_IsSending(&UartLite));
 
-        // Send the end of the command (this command is required)
-        u8 end_cmd[3] = {0xFF, 0xFF, 0xFF};
-        XUartLite_Send(&UartLite, end_cmd, sizeof(end_cmd)); //send the end of the packet
+    // Send the end of the command (this command is required)
+    u8 end_cmd[3] = {0xFF, 0xFF, 0xFF};
+    XUartLite_Send(&UartLite, end_cmd, sizeof(end_cmd)); //send the end of the packet
 
-        // Wait for the end command to be fully transmitted
-        while (XUartLite_IsSending(&UartLite));
+    // Wait for the end command to be fully transmitted
+    while (XUartLite_IsSending(&UartLite));
 
     xil_printf("The data is sent.\n");
 }
 
 int main() {
     init_platform();
-
     print("Starting UART and GPIO communication\n\r");
 
     // Initialize UART Lite
@@ -111,8 +113,16 @@ int main() {
     }
 
     while (1) {
-        ReceiveData(); // Continuously listen for data from the Nextion display
-        TransmitData(); // Optional: Transmit data as required
+    	if (led_state == 1) {
+    	            // LED is ON: Continue transmitting data
+    	            TransmitData();
+    	        } else {
+    	            // LED is OFF: Wait for it to turn back ON by monitoring incoming data
+    	            xil_printf("LED is OFF. Waiting for it to turn ON...\n");
+    	            while (led_state == 0) {
+    	                ReceiveData(); // Continuously check for button press in the background
+    	            }
+    	        }
     }
 
     cleanup_platform();
