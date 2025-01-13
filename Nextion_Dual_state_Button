@@ -1,0 +1,131 @@
+#include <stdio.h>
+#include "platform.h"
+#include "xil_printf.h"
+#include "xparameters.h"
+#include "xuartlite.h"
+#include "xgpio.h"
+
+#define UARTLITE_DEVICE_ID XPAR_AXI_UARTLITE_0_DEVICE_ID
+#define GPIO_DEVICE_ID XPAR_AXI_GPIO_0_DEVICE_ID
+#define LED_CHANNEL 1
+
+XUartLite UartLite;
+XGpio Gpio;
+
+// Variable to hold the current LED state (0 = OFF, 1 = ON)
+static int led_state = 0;
+
+// Function to initialize the AXI UART Lite
+int InitializeUART() {
+    int status = XUartLite_Initialize(&UartLite, UARTLITE_DEVICE_ID);
+    if (status != XST_SUCCESS) {
+        xil_printf("UART initialization failed!\n");
+        return XST_FAILURE;
+    }
+    xil_printf("UART initialized successfully.\n");
+    return XST_SUCCESS;
+}
+
+// Function to initialize GPIO
+int InitializeGPIO() {
+    int status = XGpio_Initialize(&Gpio, GPIO_DEVICE_ID);
+    if (status != XST_SUCCESS) {
+        xil_printf("GPIO initialization failed!\n");
+        return XST_FAILURE;
+    }
+    XGpio_SetDataDirection(&Gpio, LED_CHANNEL, 0x0); // Set LED channel as output
+    xil_printf("GPIO initialized successfully.\n");
+    return XST_SUCCESS;
+}
+
+// Function to check the state of the dual-state button on the Nextion display
+int CheckButtonState() {
+
+    u8 rx_buffer[7];
+    int receive_cnt = 0;
+
+    // Command to request the button state
+    char command[] = "get bt0.val";
+    XUartLite_Send(&UartLite, (u8 *)command, strlen(command));
+    while (XUartLite_IsSending(&UartLite));
+
+    // Send the end command
+    u8 end_cmd[3] = {0xFF, 0xFF, 0xFF};
+    XUartLite_Send(&UartLite, end_cmd, sizeof(end_cmd));
+    while (XUartLite_IsSending(&UartLite));
+
+    // Receive the response
+    while (receive_cnt < sizeof(rx_buffer)) {
+        receive_cnt += XUartLite_Recv(&UartLite, &rx_buffer[receive_cnt], 1);
+    }
+
+    // Verify the response format: starts with 0x71 and ends with 0xFF 0xFF 0xFF
+    return rx_buffer[1];
+}
+
+
+// Function to transmit data only if conditions are met
+void TransmitData() {
+    int data_digital;
+    xil_printf("\nEnter data:");
+    scanf("%d", &data_digital);
+    xil_printf("%d\n",data_digital);
+
+    // Format the main part of the command
+    char command_digital[50];
+    sprintf(command_digital, "digital.val=%d", data_digital);
+
+    // Check button state before transmitting
+
+        XUartLite_Send(&UartLite, (u8 *)command_digital, strlen(command_digital));
+        xil_printf("Sending data to the Nextion: %s\n", command_digital);
+
+        // Wait for the command to be fully transmitted
+        while (XUartLite_IsSending(&UartLite));
+
+        // Send the end of the command
+        u8 end_cmd[3] = {0xFF, 0xFF, 0xFF};
+        XUartLite_Send(&UartLite, end_cmd, sizeof(end_cmd));
+
+        // Wait for the end command to be fully transmitted
+        while (XUartLite_IsSending(&UartLite));
+
+        xil_printf("The data is sent.\n");
+    }
+
+
+
+int main() {
+    init_platform();
+    print("Starting UART and GPIO communication\n\r");
+
+    // Initialize UART Lite
+    if (InitializeUART() != XST_SUCCESS) {
+        return XST_FAILURE;
+    }
+
+    // Initialize GPIO
+    if (InitializeGPIO() != XST_SUCCESS) {
+        return XST_FAILURE;
+    }
+
+    while (1) {
+        // Wait for FF to be received
+        u8 rx_buffer[4];
+        int receive_cnt = 0;
+        while (receive_cnt < 1) {
+            receive_cnt += XUartLite_Recv(&UartLite, &rx_buffer[receive_cnt], 1);
+        }
+
+
+          //  xil_printf("FF detected. Checking button state and transmitting data.\n");
+            int button_state = CheckButtonState();
+                if (button_state == 1) {
+                	TransmitData();
+                }
+        }
+
+
+    cleanup_platform();
+    return 0;
+}
