@@ -11,27 +11,29 @@ entity ARINC429_Rx_Handler is
     Port ( i_clk : in STD_LOGIC;
            i_data_A :in std_logic;
            i_data_B :in std_logic;
+           i_fifo_full :in std_logic;
            o_state_cnt :out std_logic_vector(2 downto 0);
            o_bit_counter:out std_logic_vector(4 downto 0);
-           o_label_buffer :out std_logic_vector (7 downto 0);
-           o_data_height : out std_logic_vector(18 downto 0) 
+           --o_label_buffer :out std_logic_vector (7 downto 0);
+           o_wr_en :out std_logic;
+           o_sample :out std_logic;
+           o_packet_height : out std_logic_vector(31 downto 0) 
            );
 end ARINC429_Rx_Handler;
 
 architecture Behavioral of ARINC429_Rx_Handler is
 
 constant c_bit_period :integer := g_clkfreq/ g_baudrate; --it takes 10uSec to sample 1 bit, so i need to sample every 1000 clock edges
+constant c_sample :integer := c_bit_period /4;
 
 signal s_bit_cnt :integer range 0 to 31 :=0;
 signal s_clk_cnt :integer :=0;
 signal s_packet_buffer :std_logic_vector (31 downto 0);
-signal s_label_buffer :std_logic_vector (7 downto 0);
-signal s_data_buffer :std_logic_vector (18 downto 0);
 signal s_decoded_height :integer :=0;
 
 
 
-type state_type is (reset,idle,label_filter,data,send_data);
+type state_type is (reset,sample,delay,data,send_data);
 signal state : state_type:=reset;
 
 begin
@@ -43,58 +45,73 @@ begin
                 o_state_cnt <= "000";     
                 s_bit_cnt <= 0;
                 s_clk_cnt <= 0;
-                s_data_buffer <= (others => '0');
-                s_label_buffer <= (others => '0'); -- Reset label buffer
+                o_sample<= '0';                
                 s_packet_buffer <= (others => '0');
                 s_decoded_height <= 0;
-                o_label_buffer <= (others =>'0');               
-                state <= idle;
+                o_wr_en <= '0';
+                             
+                if i_fifo_full = '0' then              
+                    state <= sample;
+                else 
+                    state <= reset;
+                end if;    
                                
 ----------------------------------------------------------------------------------            
-            when idle =>                
-                o_state_cnt <= "001";               
-                if (s_clk_cnt = (c_bit_period-1)) then 
-                    s_clk_cnt <= 0;
+            when sample =>                
+                o_state_cnt <= "001";
+                o_sample <= '1';               
+                if (s_clk_cnt = c_sample-1) then --if the clk=250 cycles then sample   
+                s_clk_cnt <= 0;
+                o_sample <= '0';                                
                     if (i_data_A = '1') then -- Data received on line A                        
-                        s_packet_buffer(s_bit_cnt) <= i_data_A; -- Store data in packet buffer
-                        s_bit_cnt <= s_bit_cnt + 1;   -- Increment bit counter                      
-                        if (s_bit_cnt = 31) then -- If the buffer is full
-                            s_label_buffer <= s_packet_buffer(7 downto 0);
-                            state <= label_filter;
+                        s_packet_buffer(s_bit_cnt) <= i_data_A; -- Store data in packet ARINC429_Rx_Handler
+                                                                                            
+                        if (s_bit_cnt = 31) then -- If the buffer is full                           
+                            state <= data;  
+                        else   
+                            s_bit_cnt <= s_bit_cnt+1;                         
+                            state <=delay;
                         end if;
                     elsif (i_data_B = '1') then                      
-                        s_packet_buffer(s_bit_cnt) <= not (i_data_B); -- Line B represents '0'
-                        s_bit_cnt <= s_bit_cnt + 1;
+                        s_packet_buffer(s_bit_cnt) <= not i_data_B; -- Line B represents '0'                                          
                         if (s_bit_cnt = 31) then
-                            s_label_buffer <= s_packet_buffer(7 downto 0);
-                            state <= label_filter;
+                            state <= data;                            
+                        else
+                            s_bit_cnt <= s_bit_cnt+1;
+                            state <= delay;
                         end if;
                     end if;
                 else 
-                    s_clk_cnt <= s_clk_cnt + 1;
+                    s_clk_cnt <= s_clk_cnt + 1;                    
                 end if; 
                 
 ----------------------------------------------------------------------------------            
-            when label_filter =>
-                o_state_cnt <= "010"; 
-                o_label_buffer <= s_label_buffer; -- Output the label                  
-                if (s_label_buffer = "00101110") then -- If label matches
-                    state <= data;
-                else 
-                    s_label_buffer <= (others => '0'); -- Clear label buffer
-                    state <= reset;
-                end if; 
+            when delay =>
+            o_state_cnt <="010";
+            o_sample<= '0';
+                 if (s_clk_cnt = (c_bit_period - c_sample -1)) then  -- 1000-250 cycles
+                     s_clk_cnt <= 0;
+                    state <= sample;
+                else
+                    s_clk_cnt <= s_clk_cnt + 1;
+                end if;
+
 ----------------------------------------------------------------------------------            
             when data => 
                 o_state_cnt <= "011";
-                s_decoded_height <= to_integer(unsigned(s_packet_buffer(28 downto 10))) / 32;   
+                o_packet_height <= s_packet_buffer;
+                s_clk_cnt <= 0;
+                s_bit_cnt <= 0;
                 state <= send_data;
 ---------------------------------------------------------------------------------           
            when send_data => 
                 o_state_cnt <= "100";
-                o_data_height <= std_logic_vector(to_unsigned(s_decoded_height, o_data_height'length));                
+                o_wr_en <= '1';                
                 state <= reset;      
 ---------------------------------------------------------------------------------           
+      
+        
+        
         end case;
     end if;
     o_bit_counter <= std_logic_vector(to_unsigned(s_bit_cnt, o_bit_counter'length));
