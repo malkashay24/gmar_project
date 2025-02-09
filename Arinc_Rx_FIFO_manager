@@ -1,0 +1,79 @@
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.numeric_std.ALL; --library for converting from vector to integer 
+
+entity FIFO_manager is
+Port (
+    i_clk : in STD_LOGIC;
+    i_Arinc_packet :in std_logic_vector (31 downto 0);
+    i_fifo_empty :in std_logic;
+    o_data_parallel :out std_logic_vector (18 downto 0);
+    o_rd_en :out std_logic
+ );
+end FIFO_manager;
+
+architecture Behavioral of FIFO_manager is
+
+
+signal s_data_buffer :std_logic_vector (18 downto 0):= (others => '0');
+signal s_label_buffer :std_logic_vector(7 downto 0) := (others => '0');
+signal s_decoded_height :integer :=0;
+signal s_packet_buffer :std_logic_vector(31 downto 0);
+
+type state_type is (reset,idle,label_filter,label_load,data,send_data);
+signal state : state_type:=idle;
+
+begin
+
+process(i_clk)
+begin
+    if rising_edge(i_clk) then 
+        case state is 
+            
+            when reset =>           
+                s_data_buffer <= (others =>'0');
+                o_rd_en <= '0';
+                s_decoded_height <= 0;
+                s_label_buffer <= (others => '0');
+                state <= idle;
+             
+                
+            when idle =>            
+                if i_fifo_empty = '0' then                 
+                    o_rd_en <= '1';
+                    state <= label_load;
+                else state <= idle;
+                end if;
+           
+           when label_load =>          
+                s_packet_buffer <= i_Arinc_packet;
+                s_label_buffer <= i_Arinc_packet(7 downto 0);  
+                o_rd_en<='0';
+                state <= label_filter;
+                
+                
+            when label_filter =>            
+                o_rd_en <= '0';
+                if (s_label_buffer = "00101110") then -- If label matches
+                    state <= data;
+                else 
+                    s_label_buffer <= (others => '0'); -- Clear label buffer
+                    state <= idle;
+                end if;
+                 
+             when data =>             
+                s_decoded_height <= to_integer(unsigned(s_packet_buffer(28 downto 10))) / 32; --resolution of the copilot 
+                state <= send_data;
+                
+             when send_data =>            
+                o_data_parallel  <= std_logic_vector(to_unsigned(s_decoded_height, o_data_parallel'length));
+                state <= idle;
+          
+                     
+            end case;
+    end if;
+end process;
+
+
+end Behavioral;
