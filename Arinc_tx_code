@@ -1,0 +1,263 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.numeric_std.ALL; --library for converting from vector to integer 
+
+entity ARINC429_Tx is
+    generic (
+        g_baudrate : integer := 100000;
+        g_clkfreq  : integer := 100000000
+    );
+    Port (
+        i_clk          : in  STD_LOGIC;
+        i_data_parallel : in  std_logic_vector(18 downto 0);
+        o_state_cnt :out std_logic_vector (2 downto 0);
+        o_bit_cnt :out std_logic_vector (5 downto 0);
+        o_packet_sent :out std_logic_vector (31 downto 0);
+        o_Arinc_A : out std_logic;
+        o_parity_cnt :out std_logic_vector (5 downto 0);
+        o_Arinc_B :out std_logic
+    );
+end ARINC429_Tx;
+
+architecture Behavioral of ARINC429_Tx is
+    constant c_bit_period : integer := g_clkfreq / g_baudrate;
+
+    signal s_clk_cnt      : integer := 0;
+    signal s_bit_cnt      : integer := 0;
+    
+    signal s_label_buffer : std_logic_vector(7 downto 0) := "00101110"; -- i want to send the lsb first; "01110100"
+    signal s_SDI_buffer :std_logic_vector (1 downto 0) := "00";
+    signal s_data_buffer :std_logic_vector ( 18 downto 0);
+    signal s_SSM_buffer :std_logic_vector (1 downto 0) := "11";
+    signal s_pairity_cnt :integer :=0;
+    signal s_output_A : std_logic := '0';
+    signal s_output_B : std_logic := '0';    
+    signal s_Pbit_value  : std_logic;
+    signal s_decoded_height :integer := 0;
+    signal s_current_data :std_logic_vector(18 downto 0):= (others => '0');
+    signal s_packet_buffer :std_logic_vector(30 downto 0);
+    signal s_bit_index :integer :=0;
+    
+
+    type state_type is (idle, Label_state, SDI, data, SSM, pairity_calculation,pairity , delay);
+    signal state : state_type := idle;
+
+begin
+    process(i_clk)
+    begin
+        if rising_edge(i_clk) then
+            case state is
+                when idle =>
+                o_state_cnt <= "000";
+                    s_data_buffer <= (others => '0'); 
+                    s_clk_cnt      <= 0;                    
+                    s_bit_cnt      <= 0;
+                    s_Pbit_value    <= '0';
+                    s_decoded_height <= 0 ;
+                    s_pairity_cnt <= 1; 
+                   -- if (s_current_data /= i_data_parallel) then          
+                     --   s_current_data <= i_data_parallel;        
+                        s_decoded_height <= to_integer(unsigned(i_data_parallel)) * 32; --resolution of the copilot 
+                        state<= Label_state;
+                  -- end if;
+
+                when Label_state =>
+                o_state_cnt <= "001";
+                    if s_label_buffer (s_bit_cnt) = '1' then --if you need to send '1' send it for 500 cycles
+                      --  s_pairity_cnt <= s_pairity_cnt + 1;
+                        s_output_B <= '0';   
+                        if (s_clk_cnt < c_bit_period / 2) then                             
+                            s_output_A <= '1'; 
+                        else
+                        s_output_A <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    else
+                        s_output_A <= '0';                   
+                        if (s_clk_cnt < c_bit_period / 2) then                             
+                            s_output_B <= '1'; 
+                        else
+                        s_output_B <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    end if;
+
+                    if s_clk_cnt = c_bit_period - 1 then --if you counted 500 cycles then
+                        s_clk_cnt <= 0;
+                        if (s_bit_cnt = 7 ) then
+                            s_bit_cnt <= 0; 
+                            state <= SDI;
+                        else 
+                            s_bit_cnt <= s_bit_cnt+1;
+                            state <= Label_state;
+                        end if;
+                    else
+                        s_clk_cnt <= s_clk_cnt + 1;
+                    end if;
+-----------------------------------------------------------------------------------------------------                
+                when SDI =>
+                o_state_cnt <= "010";
+                    if s_SDI_buffer (s_bit_cnt) = '1' then --if you need to send '1' send it for 500 cycles
+                       -- s_pairity_cnt <= s_pairity_cnt + 1;
+                        s_output_B <= '0';
+                        if (s_clk_cnt < c_bit_period / 2) then 
+                            s_output_A <= '1'; 
+                        else
+                        s_output_A <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    else
+                        s_output_A <= '0';
+                        if (s_clk_cnt < c_bit_period / 2) then                             
+                            s_output_B <= '1'; 
+                        else
+                        s_output_B <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    end if;
+
+                    if s_clk_cnt = c_bit_period - 1 then --if you counted 500 cycles then
+                        s_clk_cnt <= 0;
+                        if (s_bit_cnt = 1 ) then
+                            s_bit_cnt <= 0;
+                            s_data_buffer <= std_logic_vector(to_unsigned(s_decoded_height, s_data_buffer'length)); 
+                            state <= data;
+                        else 
+                            s_bit_cnt <= s_bit_cnt+1;
+                            state <= SDI;
+                        end if;
+                    else
+                        s_clk_cnt <= s_clk_cnt + 1;
+                    end if;
+---------------------------------------------------------------------------------------------------------------                        
+                    when data =>
+                    o_state_cnt <= "011"; -- 3
+                    if s_data_buffer (s_bit_cnt) = '1' then --if you need to send '1' send it for 500 cycles
+                        --s_pairity_cnt <= s_pairity_cnt + 1;
+                        s_output_B <= '0';
+                        if (s_clk_cnt < c_bit_period / 2) then 
+                            s_output_A <= '1'; 
+                        else
+                        s_output_A <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    else
+                        s_output_A <= '0';
+                        if (s_clk_cnt < c_bit_period / 2) then                             
+                            s_output_B <= '1'; 
+                        else
+                        s_output_B <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    
+                    end if;
+
+                    if s_clk_cnt = c_bit_period - 1 then --if you counted 500 cycles then
+                        s_clk_cnt <= 0;
+                        if (s_bit_cnt = 18 ) then
+                            s_bit_cnt <= 0; 
+                            state <= SSM;
+                        else 
+                            s_bit_cnt <= s_bit_cnt+1;
+                            state <= data;
+                        end if;
+                    else
+                        s_clk_cnt <= s_clk_cnt + 1;
+                    end if;
+---------------------------------------------------------------------------------------------------------------------
+                    when SSM=>
+                    o_state_cnt <= "100"; -- 4
+                        if s_SSM_buffer (s_bit_cnt) = '1' then --if you need to send '1' send it for 500 cycles
+                          --  s_pairity_cnt <= s_pairity_cnt + 1;
+                            s_output_B <= '0';
+                            if (s_clk_cnt < c_bit_period / 2) then 
+                                s_output_A <= '1'; 
+                            else
+                            s_output_A <= '0'; --after 500 cycels send '0' for onother 500
+                            end if;
+                        else
+                            s_output_A <= '0';
+                        if (s_clk_cnt < c_bit_period / 2) then                             
+                            s_output_B <= '1'; 
+                        else
+                        s_output_B <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    
+                        end if;
+
+                        if s_clk_cnt = c_bit_period - 1 then --if you counted 500 cycles then
+                            s_clk_cnt <= 0;
+                            if (s_bit_cnt = 1 ) then
+                                s_bit_cnt <= 0; 
+                                s_packet_buffer <= s_SSM_buffer & s_data_buffer & s_SDI_buffer & s_label_buffer;
+                                state <= pairity_calculation;
+                        else 
+                            s_bit_cnt <= s_bit_cnt+1;
+                            state <= SSM;
+                        end if;
+                    else
+                        s_clk_cnt <= s_clk_cnt + 1;
+                    end if;
+---------------------------------------------------------------------------------------------------
+                    when pairity_calculation =>
+                    o_state_cnt <= "101";
+                    if (s_bit_cnt = 30) then
+                        if (s_pairity_cnt mod 2 = 0) then --if you need to send '1' send it for 500 cycles
+                            s_Pbit_value <= '1';
+                            s_bit_cnt <=0;
+                            state <= pairity;
+                        else 
+                            s_Pbit_value <= '0';
+                            s_bit_cnt <=0;
+                            state <= pairity;
+                        end if;
+                    else 
+                        if (s_packet_buffer(s_bit_cnt) = '1') then 
+                            s_pairity_cnt <= s_pairity_cnt +1;
+                            s_bit_cnt <= s_bit_cnt +1;
+                        else 
+                            s_bit_cnt <= s_bit_cnt +1;
+                        end if;
+                    end if;
+                    
+                    
+                    when pairity =>
+                    o_state_cnt <= "110";
+                        if (s_Pbit_value = '1') then --if you need to send '1' send it for 500 cycles
+                            s_output_B <= '0';
+                            if (s_clk_cnt < c_bit_period / 2) then 
+                                s_output_A <= '1'; 
+                            else
+                            s_output_A <= '0'; --after 500 cycels send '0' for onother 500
+                            end if;
+                        else
+                            s_output_A <= '0';
+                        if (s_clk_cnt < c_bit_period / 2) then                             
+                            s_output_B <= '1'; 
+                        else
+                        s_output_B <= '0'; --after 500 cycels send '0' for onother 500
+                        end if;
+                    
+                        end if;
+
+                        if s_clk_cnt = c_bit_period - 1 then --if you counted 500 cycles then
+                            s_clk_cnt <= 0;
+                            state <= delay;
+                        else
+                        s_clk_cnt <= s_clk_cnt + 1;
+                    end if;
+                    o_packet_sent <= s_Pbit_value & s_SSM_buffer & s_data_buffer & s_SDI_buffer & s_label_buffer;
+                     
+                     
+                     when delay => 
+                       o_state_cnt <= "111";
+                            if (s_clk_cnt = 5* c_bit_period) then
+                                state <= idle;
+                            else 
+                                s_clk_cnt <= s_clk_cnt +1;
+                            end if;
+                     end case; 
+        end if;
+    end process;
+
+    o_Arinc_A <= s_output_A;
+    o_Arinc_B <= s_output_B;
+    o_bit_cnt <= std_logic_vector(to_unsigned(s_bit_cnt, o_bit_cnt'length));
+    o_parity_cnt <= std_logic_vector(to_unsigned(s_pairity_cnt, o_parity_cnt'length));
+    --o_packet_sent <= s_packet_buffer;
+
+end Behavioral;
