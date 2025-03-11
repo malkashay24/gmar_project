@@ -1,0 +1,282 @@
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.numeric_std.ALL; --library for converting from vector to integer 
+
+
+entity RS_422_uart is
+
+    generic (
+           g_baud_rate :integer := 115200;
+           g_clk_freq :integer := 100000000
+    );
+    Port ( i_data_parallel : in STD_LOGIC_vector(18 downto 0);
+           i_clk :in std_logic;
+          -- o_send_new :out std_logic;
+           o_sp336e_en :out std_logic;
+           o_state_cnt :out std_logic_vector(2 downto 0);
+           o_Sdata_buffer :out std_logic_vector(7 downto 0); 
+           o_bit_cnt :out std_logic_vector (2 downto 0);
+           o_word_cnt :out std_logic_vector(4 downto 0);
+           o_data_serial : out STD_LOGIC);
+end RS_422_uart;
+
+architecture Behavioral of RS_422_uart is
+
+constant c_bit_period :integer := g_clk_freq/g_baud_rate;
+
+
+signal s_19bit_data :integer;
+signal s_data_buffer0 :std_logic_vector(7 downto 0);
+signal s_data_buffer1 :std_logic_vector(7 downto 0);
+signal s_data_buffer2 :std_logic_vector(7 downto 0) := (others =>'0');
+signal s_data_buffer3 :std_logic_vector(7 downto 0);
+
+signal s_h_ascii :std_logic_vector(7 downto 0) :="01101000";
+signal s_e_ascii :std_logic_vector(7 downto 0) :="01100101";
+signal s_i_ascii :std_logic_vector(7 downto 0) :="01101001";
+signal s_g_ascii :std_logic_vector(7 downto 0) :="01100111";
+signal s_t_ascii :std_logic_vector(7 downto 0) :="01110100";
+
+signal s_space_acsii :std_logic_vector(7 downto 0) := "00100000";
+
+signal s_s_ascii :std_logic_vector(7 downto 0) :="01110011";
+signal s_o_ascii :std_logic_vector(7 downto 0) := "01101111";
+signal s_u_ascii :std_logic_vector(7 downto 0) := "01110101";
+signal s_r_ascii :std_logic_vector(7 downto 0) := "01110010";
+signal s_c_ascii :std_logic_vector(7 downto 0) := "01100011";
+
+
+signal s_colon_ascii :std_logic_vector(7 downto 0) := "00111010"; -- ":"
+signal s_space_ascii :std_logic_vector(7 downto 0) := "00100000"; -- Space
+signal s_cohavit_ascii :std_logic_vector(7 downto 0) := "00101010";
+signal s_makaf_ascii :std_logic_vector(7 downto 0) := "00101101";
+
+signal s_a_ascii :std_logic_vector(7 downto 0) := "01000001";
+--signal s_r_ascii2 :std_logic_vector(7 downto 0) := "01110010";
+--signal s_i_ascii2 :std_logic_vector(7 downto 0) := "01101001";
+signal s_n_ascii :std_logic_vector(7 downto 0) := "01101110";
+--signal s_c_ascii2 :std_logic_vector(7 downto 0) := "01100011";
+
+
+
+
+signal s_data_buffer :std_logic_vector(7 downto 0) := (others => '0');
+signal s_clk_cnt :integer :=0;
+signal s_bit_cnt :integer :=0;
+signal s_word_cnt :integer :=0;
+signal s_data_sent :std_logic := '1';
+
+
+type state_type is (idle, start_bit,data_word_load, data_bits, stop_bit); -- states of the UART
+signal state : state_type := idle; -- variable that includes the states of the UART
+
+begin
+process(i_clk) 
+begin
+
+    if rising_edge(i_clk) then 
+    
+    case state is 
+    
+    when idle =>
+    o_state_cnt <= "000";
+        s_19bit_data <= to_integer(unsigned(i_data_parallel));
+        s_clk_cnt <= 0;
+        s_bit_cnt <= 0;       
+       -- o_send_new <= '0';
+        s_data_sent <= '1';
+        state <= start_bit;
+        
+    when start_bit =>
+    o_state_cnt <= "001";
+        s_data_buffer0 <= std_logic_vector(to_unsigned(((s_19bit_data mod 10)+48), s_data_buffer0'length));                    -- Ones place
+        s_data_buffer1 <= std_logic_vector(to_unsigned(((s_19bit_data / 10) mod 10) + 48, s_data_buffer1'length));              -- Tens place
+        s_data_buffer2 <= std_logic_vector(to_unsigned(((s_19bit_data / 100) mod 10) + 48, s_data_buffer2'length));                    -- Hundreds place
+        s_data_buffer3 <= std_logic_vector(to_unsigned(((s_19bit_data / 1000) mod 10 ) + 48, s_data_buffer3'length));                    -- Hundreds place
+
+     
+        s_data_sent <= '0';
+        if (s_clk_cnt = c_bit_period -1) then
+            s_clk_cnt <= 0;
+            state <= data_word_load;
+        else
+            s_clk_cnt <= s_clk_cnt +1;
+        end if;  
+          
+    when data_word_load =>
+     o_state_cnt <= "010";
+        if (s_word_cnt = 0) then
+            s_data_buffer <= s_h_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+            
+        elsif (s_word_cnt = 1) then
+            s_data_buffer <= s_e_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+        
+        elsif (s_word_cnt = 2) then
+            s_data_buffer <= s_i_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+        elsif (s_word_cnt = 3) then
+            s_data_buffer <= s_g_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+        elsif (s_word_cnt = 4) then
+            s_data_buffer <= s_h_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+        elsif (s_word_cnt = 5) then
+            s_data_buffer <= s_t_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+        elsif (s_word_cnt = 6) then
+            s_data_buffer <= s_colon_ascii; -- ":"
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+        elsif (s_word_cnt = 7) then
+            s_data_buffer <= s_data_buffer3;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+        elsif (s_word_cnt = 8) then 
+            s_data_buffer <= s_data_buffer2;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 9) then
+            s_data_buffer <= s_data_buffer1;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+       
+       elsif (s_word_cnt = 10) then
+            s_data_buffer <= s_data_buffer0;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+ 
+       elsif (s_word_cnt = 11) then
+            s_data_buffer <= s_space_ascii; -- " "
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+               
+       elsif (s_word_cnt = 12) then
+            s_data_buffer <= s_s_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 13) then
+            s_data_buffer <= s_o_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 14) then
+            s_data_buffer <= s_u_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 15) then
+            s_data_buffer <= s_r_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 16) then
+            s_data_buffer <= s_c_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 17) then
+            s_data_buffer <= s_e_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 18) then
+            s_data_buffer <= s_colon_ascii; -- ":"
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 19) then
+            s_data_buffer <= s_space_ascii; -- " "
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 20) then
+            s_data_buffer <= s_a_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 21) then
+            s_data_buffer <= s_r_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 22) then
+            s_data_buffer <= s_i_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 23) then
+            s_data_buffer <= s_n_ascii;
+            s_word_cnt <= s_word_cnt + 1;
+            state <= data_bits;
+
+       elsif (s_word_cnt = 24) then
+            s_data_buffer <= s_c_ascii;
+            s_word_cnt <= s_word_cnt +1;
+            state <= data_bits;
+       
+      elsif (s_word_cnt = 25) then
+            s_data_buffer <= "00001101";
+            s_word_cnt <= 0;
+           state <= data_bits;
+       
+      -- elsif (s_word_cnt = 31) then
+        --    s_data_buffer <= "00001010";
+       --     s_word_cnt <= 0;
+        --    state <= data_bits;
+       
+       
+       end if;
+
+       
+       when data_bits =>
+       o_state_cnt <= "011";
+       s_data_sent <= s_data_buffer(s_bit_cnt);
+        if (s_clk_cnt = c_bit_period -1) then --if u reached bit period check if you sent 8 bits if not repeat
+            s_clk_cnt <=0; 
+            if (s_bit_cnt = 7 ) then
+                s_bit_cnt <= 0;
+                state <= stop_bit;
+            else 
+                s_bit_cnt<= s_bit_cnt+1;
+            end if;
+        else 
+            s_clk_cnt <= s_clk_cnt+1;
+        end if;
+        
+        when stop_bit =>
+        o_state_cnt <= "100";
+            s_data_sent <= '1';
+            if (s_clk_cnt = c_bit_period) then
+                s_clk_cnt <= 0;               
+                state <= idle; 
+            else 
+                s_clk_cnt <= s_clk_cnt +1;
+            end if;
+        
+    end case;
+    end if;
+    o_data_serial <= not (s_data_sent);
+    o_Sdata_buffer <= s_data_buffer;
+    o_sp336e_en <= '1';
+    --o_send_new <= '1';
+    o_word_cnt <= std_logic_vector(to_unsigned(s_word_cnt, o_word_cnt'length));    
+    o_bit_cnt <= std_logic_vector(to_unsigned(s_bit_cnt, o_bit_cnt'length));
+end process;
+end Behavioral;
