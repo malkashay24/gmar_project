@@ -1,0 +1,70 @@
+#include <stdio.h>
+#include "platform.h"
+#include "xil_printf.h"
+#include "xadcps.h"
+#include "xparameters.h"
+#include "sleep.h"
+
+#define XADC_DEVICE_ID XPAR_XADCPS_0_DEVICE_ID
+#define VP_VN_CHANNEL  XADCPS_CH_VPVN
+#define HYSTERESIS 40
+
+XAdcPs XAdcInst;
+XAdcPs_Config *ConfigPtr;
+
+int main() {
+    init_platform();
+    print("XADC Start\n\r");
+
+    int Status;
+    u16 raw_data, prev_raw_data = 0, peak_value = 0;
+    float voltage = 0.0;
+    float height = 0.0;
+    float VREF = 1.0;
+    int rising = 1;
+
+    ConfigPtr = XAdcPs_LookupConfig(XADC_DEVICE_ID);
+    if (ConfigPtr == NULL) {
+        print("XADC LookupConfig failed\n\r");
+        return -1;
+    }
+
+    Status = XAdcPs_CfgInitialize(&XAdcInst, ConfigPtr, ConfigPtr->BaseAddress);
+    if (Status != XST_SUCCESS) {
+        print("XADC Initialization failed\n\r");
+        return -1;
+    }
+
+    XAdcPs_SetSequencerMode(&XAdcInst, XADCPS_SEQ_MODE_CONTINPASS);
+    XAdcPs_SetSeqInputMode(&XAdcInst, XADCPS_SEQ_MODE_SAFE);
+    XAdcPs_SetSeqChEnables(&XAdcInst, XADCPS_CH_VPVN);
+
+    prev_raw_data = (XAdcPs_GetAdcData(&XAdcInst, VP_VN_CHANNEL) >> 4);
+    peak_value = prev_raw_data;
+
+    while (1) {
+        raw_data = (XAdcPs_GetAdcData(&XAdcInst, VP_VN_CHANNEL) >> 4);
+
+//        xil_printf("Raw Data: %d\t Height: %.1f feet\n", raw_data, height); // Debugging
+
+        if (rising) {
+            if (raw_data > prev_raw_data) {
+                peak_value = raw_data;
+                height = ((float)raw_data / 4095.0) * 1250;  // Convert to height in feet
+                voltage = ((float)peak_value / 4095.0) * VREF;
+            } else if (raw_data < (peak_value - HYSTERESIS)) {
+                printf("Peak Detected -> Raw Data: %d\t Height: %.1f feet voltage: %.3f V \n", peak_value, height,voltage);
+                rising = 0;
+            }
+        } else {
+            if (raw_data > prev_raw_data + HYSTERESIS) {
+                rising = 1;
+            }
+        }
+
+        prev_raw_data = raw_data;
+    }
+
+    cleanup_platform();
+    return 0;
+}
