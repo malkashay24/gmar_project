@@ -5,6 +5,7 @@
 #include "xparameters.h"
 #include "sleep.h"
 
+
 #define XADC_DEVICE_ID XPAR_XADCPS_0_DEVICE_ID
 #define VP_VN_CHANNEL  XADCPS_CH_VPVN
 #define HYSTERESIS 40
@@ -17,8 +18,8 @@ int main() {
     print("XADC Start\n\r");
 
     int Status;
-    u16 raw_data, prev_raw_data = 0, peak_value = 0;
-    float voltage = 0.0;
+    u16 raw_data, prev_raw_data = 0, peak_value = 0, last_printed_peak = 0;
+    float voltage,last_voltage_value = 0.0;
     float height = 0.0;
     float VREF = 1.0;
     int rising = 1;
@@ -41,22 +42,28 @@ int main() {
 
     prev_raw_data = (XAdcPs_GetAdcData(&XAdcInst, VP_VN_CHANNEL) >> 4);
     peak_value = prev_raw_data;
+    last_printed_peak = peak_value;  // Initialize with first peak
 
     while (1) {
         raw_data = (XAdcPs_GetAdcData(&XAdcInst, VP_VN_CHANNEL) >> 4);
-
-//        xil_printf("Raw Data: %d\t Height: %.1f feet\n", raw_data, height); // Debugging
 
         if (rising) {
             if (raw_data > prev_raw_data) {
                 peak_value = raw_data;
                 height = ((float)raw_data / 4095.0) * 1250;  // Convert to height in feet
                 voltage = ((float)peak_value / 4095.0) * VREF;
-            } else if (raw_data < (peak_value - HYSTERESIS)) {
-                printf("Peak Detected -> Raw Data: %d\t Height: %.1f feet voltage: %.3f V \n", peak_value, height,voltage);
+            }
+            else if (raw_data < (peak_value - HYSTERESIS)) {
+                // Only print if peak changed by more than 100 in either direction
+                if ((voltage - last_voltage_value> 0.02) || (last_voltage_value - voltage > 0.02)) {
+                    printf("Peak Detected -> Raw Data: %d\t Height: %.1f feet Voltage: %.3f V \n",
+                           peak_value, height, voltage);
+                    		last_voltage_value = voltage;  // Update last printed peak
+                }
                 rising = 0;
             }
-        } else {
+        }
+        else { // Falling edge
             if (raw_data > prev_raw_data + HYSTERESIS) {
                 rising = 1;
             }
