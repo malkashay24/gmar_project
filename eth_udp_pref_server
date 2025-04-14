@@ -85,57 +85,57 @@ static void stats_buffer(char* outString,
 
 
 /** The report function of a TCP server session */
-//static void udp_conn_report(u64_t diff,
-//		enum report_type report_type)
-//{
-//	u64_t total_len, cnt_datagrams, cnt_dropped_datagrams, total_packets;
-//	u32_t cnt_out_of_order_datagrams;
-//	double duration, bandwidth = 0;
-//	char data[16], perf[16], time[64], drop[64];
-//
-//	if (report_type == INTER_REPORT) {
-//		total_len = server.i_report.total_bytes;
-//		cnt_datagrams = server.i_report.cnt_datagrams;
-//		cnt_dropped_datagrams = server.i_report.cnt_dropped_datagrams;
-//	} else {
-//		server.i_report.last_report_time = 0;
-//		total_len = server.total_bytes;
-//		cnt_datagrams = server.cnt_datagrams;
-//		cnt_dropped_datagrams = server.cnt_dropped_datagrams;
-//		cnt_out_of_order_datagrams = server.cnt_out_of_order_datagrams;
-//	}
+static void udp_conn_report(u64_t diff,
+		enum report_type report_type)
+{
+	u64_t total_len, cnt_datagrams, cnt_dropped_datagrams, total_packets;
+	u32_t cnt_out_of_order_datagrams;
+	double duration, bandwidth = 0;
+	char data[16], perf[16], time[64], drop[64];
 
-//	total_packets = cnt_datagrams + cnt_dropped_datagrams;
-//	/* Converting duration from milliseconds to secs,
-//	 * and bandwidth to bits/sec .
-//	 */
-//	duration = diff / 1000.0; /* secs */
-//	if (duration)
-//		bandwidth = (total_len / duration) * 8.0;
+	if (report_type == INTER_REPORT) {
+		total_len = server.i_report.total_bytes;
+		cnt_datagrams = server.i_report.cnt_datagrams;
+		cnt_dropped_datagrams = server.i_report.cnt_dropped_datagrams;
+	} else {
+		server.i_report.last_report_time = 0;
+		total_len = server.total_bytes;
+		cnt_datagrams = server.cnt_datagrams;
+		cnt_dropped_datagrams = server.cnt_dropped_datagrams;
+		cnt_out_of_order_datagrams = server.cnt_out_of_order_datagrams;
+	}
 
-//	stats_buffer(data, total_len, BYTES);
-//	stats_buffer(perf, bandwidth, SPEED);
-//	/* On 32-bit platforms, xil_printf is not able to print
-//	 * u64_t values, so converting these values in strings and
-//	 * displaying results
-//	 */
-//	sprintf(time, "%4.1f-%4.1f sec",
-//			(double)server.i_report.last_report_time,
-//			(double)(server.i_report.last_report_time + duration));
-//	sprintf(drop, "%4llu/%5llu (%.2g%%)", cnt_dropped_datagrams,
-//			total_packets,
-//			(100.0 * cnt_dropped_datagrams)/total_packets);
-//	xil_printf("[%3d] %s  %sBytes  %sbits/sec  %s\n\r", server.client_id,
-//			time, data, perf, drop);
-//
-//	if (report_type == INTER_REPORT) {
-//		server.i_report.last_report_time += duration;
-//	} else if ((report_type != INTER_REPORT) && cnt_out_of_order_datagrams) {
-//		xil_printf("[%3d] %s  %u datagrams received out-of-order\n\r",
-//				server.client_id, time,
-//				cnt_out_of_order_datagrams);
-//	}
-//}
+	total_packets = cnt_datagrams + cnt_dropped_datagrams;
+	/* Converting duration from milliseconds to secs,
+	 * and bandwidth to bits/sec .
+	 */
+	duration = diff / 1000.0; /* secs */
+	if (duration)
+		bandwidth = (total_len / duration) * 8.0;
+
+	stats_buffer(data, total_len, BYTES);
+	stats_buffer(perf, bandwidth, SPEED);
+	/* On 32-bit platforms, xil_printf is not able to print
+	 * u64_t values, so converting these values in strings and
+	 * displaying results
+	 */
+	sprintf(time, "%4.1f-%4.1f sec",
+			(double)server.i_report.last_report_time,
+			(double)(server.i_report.last_report_time + duration));
+	sprintf(drop, "%4llu/%5llu (%.2g%%)", cnt_dropped_datagrams,
+			total_packets,
+			(100.0 * cnt_dropped_datagrams)/total_packets);
+	xil_printf("[%3d] %s  %sBytes  %sbits/sec  %s\n\r", server.client_id,
+			time, data, perf, drop);
+
+	if (report_type == INTER_REPORT) {
+		server.i_report.last_report_time += duration;
+	} else if ((report_type != INTER_REPORT) && cnt_out_of_order_datagrams) {
+		xil_printf("[%3d] %s  %u datagrams received out-of-order\n\r",
+				server.client_id, time,
+				cnt_out_of_order_datagrams);
+	}
+}
 
 
 static void reset_stats(void)
@@ -162,33 +162,41 @@ static void reset_stats(void)
 static void udp_recv_perf_traffic(void *arg, struct udp_pcb *tpcb,
 		struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
-	xil_printf("hello");
 	static u8_t first = 1;
 	u32_t drop_datagrams = 0;
 	s32_t recv_id;
 
-
-	if (p == NULL)
-	{
+	if (p == NULL){
 		xil_printf("there is no data");
 	}
 
 	char data_buffer[1500];
-	//u8 temp[500];
-	//u8 read_data;
-	/*clear the buffer and copy from the received buffer*/
+
 	memset(data_buffer, 0, sizeof(data_buffer));
 	memcpy(data_buffer, p->payload, p ->len);
 
 	xil_printf("\n\r\n\r");
 
-		xil_printf("Received Data:\n\r");
+	xil_printf("Received data: \n\r");
 
-		 // Iterate through the buffer and print each byte
-		 for (int i = 0; i < p->len; i++) {
-		      xil_printf("%c\n\r",  data_buffer[i]);
-		    }
-	//}
+	for( int i=0; i< p->len; i++){
+		xil_printf("%c\n\r",data_buffer[i]);
+	}
+
+
+	const char *data = "shay";
+	struct pbuf *udp_buf = pbuf_alloc(PBUF_TRANSPORT, strlen(data), PBUF_RAM);
+	memcpy(udp_buf->payload, data, strlen(data));
+
+	ip_addr_t dest_ip;
+	IP4_ADDR(&dest_ip, 192, 168, 1, 5); // IP = 192.168.1.5
+	u16_t dest_port = port;
+
+	udp_sendto(pcb, udp_buf, &dest_ip, dest_port);
+
+	pbuf_free(udp_buf);
+
+
 
 
 	/* first, check if the datagram is received in order */
@@ -229,7 +237,7 @@ static void udp_recv_perf_traffic(void *arg, struct udp_pcb *tpcb,
 		u64_t diff_ms = now - server.start_time;
 		/* Send Ack */
 		udp_sendto(tpcb, p, addr, port);
-		//udp_conn_report(diff_ms, UDP_DONE_SERVER);
+		udp_conn_report(diff_ms, UDP_DONE_SERVER);
 		xil_printf("UDP test passed Successfully\n\r");
 		first = 1;
 		pbuf_free(p);
@@ -267,7 +275,7 @@ static void udp_recv_perf_traffic(void *arg, struct udp_pcb *tpcb,
 			u64_t diff_ms = now - server.i_report.start_time;
 
 			if (diff_ms >= REPORT_INTERVAL_TIME) {
-				//udp_conn_report(diff_ms, INTER_REPORT);
+				udp_conn_report(diff_ms, INTER_REPORT);
 				/* Reset Interim report counters */
 				server.i_report.start_time = 0;
 				server.i_report.total_bytes = 0;
@@ -279,6 +287,8 @@ static void udp_recv_perf_traffic(void *arg, struct udp_pcb *tpcb,
 			server.i_report.start_time = now;
 		}
 	}
+
+
 
 	pbuf_free(p);
 	return;
