@@ -40,12 +40,12 @@
 #include "xil_cache.h"
 
 //#if LWIP_DHCP==1
-//#include "lwip/dhcp.h"
+#include "lwip/dhcp.h"
 //extern volatile int dhcp_timoutcntr;
 //#endif
 
-extern volatile int TcpFastTmrFlag;
-extern volatile int TcpSlowTmrFlag;
+//extern volatile int TcpFastTmrFlag;
+//extern volatile int TcpSlowTmrFlag;
 
 #define DEFAULT_IP_ADDRESS	"192.168.1.10"
 #define DEFAULT_IP_MASK		"255.255.255.0"
@@ -151,29 +151,29 @@ int main(void)
 	netif_set_up(netif);
 
 //#if (LWIP_DHCP==1)
-//	/* Create a new DHCP client for this interface.
-//	 * Note: you must call dhcp_fine_tmr() and dhcp_coarse_tmr() at
-//	 * the predefined regular intervals after starting the client.
-//	 */
+	/* Create a new DHCP client for this interface.
+	 * Note: you must call dhcp_fine_tmr() and dhcp_coarse_tmr() at
+	 * the predefined regular intervals after starting the client.
+	 */
 //	dhcp_start(netif);
 //	dhcp_timoutcntr = 24;
-//	while (((netif->ip_addr.addr) == 0) && (dhcp_timoutcntr > 0))
-//		xemacif_input(netif);
-//
-//	if (dhcp_timoutcntr <= 0) {
-//		if ((netif->ip_addr.addr) == 0) {
-//			xil_printf("ERROR: DHCP request timed out\r\n");
-//			assign_default_ip(&(netif->ip_addr),
-//					&(netif->netmask), &(netif->gw));
-//		}
-//	}
-//
+	//while (((netif->ip_addr.addr) == 0) && (dhcp_timoutcntr > 0))
+		xemacif_input(netif);
+
+	///if (dhcp_timoutcntr <= 0) {
+		//if ((netif->ip_addr.addr) == 0) {
+		//	xil_printf("ERROR: DHCP request timed out\r\n");
+			assign_default_ip(&(netif->ip_addr),
+					&(netif->netmask), &(netif->gw));
+		//}
+	//}
 
 	/* print IP address, netmask and gateway */
-assign_default_ip(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
-
-
+//#else
+	assign_default_ip(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
+//#endif
 	print_ip_settings(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
+
 	xil_printf("\r\n");
 
 	/* print app header */
@@ -184,14 +184,14 @@ assign_default_ip(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
 	xil_printf("\r\n");
 
 	while (1) {
-//		if (TcpFastTmrFlag) {
-//			tcp_fasttmr();
-//			TcpFastTmrFlag = 0;
-//		}
-//		if (TcpSlowTmrFlag) {
-//			tcp_slowtmr();
-//			TcpSlowTmrFlag = 0;
-//		}
+		//if (TcpFastTmrFlag) {
+		//	tcp_fasttmr();
+		//	TcpFastTmrFlag = 0;
+	//	}
+		//if (TcpSlowTmrFlag) {
+		//	tcp_slowtmr();
+		//	TcpSlowTmrFlag = 0;
+		//}
 		xemacif_input(netif);
 	}
 
