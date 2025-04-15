@@ -8,7 +8,6 @@
 #include "xuartlite.h"
 #include "sleep.h"
 #include "xadcps.h"
-#include "sleep.h"
 #include <math.h>
 #include <stdlib.h>  // Required for atoi()
 #include "xtime_l.h"  // Include XTime library
@@ -27,6 +26,31 @@
 #define DEFAULT_IP_MASK		"255.255.255.0"
 #define DEFAULT_GW_ADDRESS	"192.168.1.1"
 
+
+#define BRAM_0_BASEADDR XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR
+#define BRAM_1_BASEADDR XPAR_AXI_BRAM_CTRL_1_S_AXI_BASEADDR
+#define DATA_LENGTH 64  // Number of 32-bit words to read
+
+#define XADC_DEVICE_ID XPAR_XADCPS_0_DEVICE_ID
+#define VP_VN_CHANNEL  XADCPS_CH_VPVN
+#define HYSTERESIS 40
+
+#define UARTLITE_DEVICE_ID XPAR_AXI_UARTLITE_0_DEVICE_ID
+//#define GPIO_DEVICE_ID XPAR_AXI_GPIO_0_DEVICE_ID
+
+XUartLite UartLite;
+//XGpio Gpio;
+
+FATFS fatfs;
+FIL counter_file;
+FIL file;
+
+#define XADC_DEVICE_ID XPAR_XADCPS_0_DEVICE_ID
+#define VP_VN_CHANNEL  XADCPS_CH_VPVN
+#define HYSTERESIS 40
+
+XAdcPs XAdcInst;
+XAdcPs_Config *ConfigPtr;
 void platform_enable_interrupts(void);
 void start_application(void);
 void print_app_header(void);
@@ -79,6 +103,162 @@ static void assign_default_ip(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
 	if (!err)
 		xil_printf("Invalid default gateway address: %d\r\n", err);
 }
+
+
+/////////////////////////////////////////////////////////////////////
+
+void SDcard(int data, const char *file_name) {
+    static int last_data = -1;  // Keep track of the last data written
+    static int initialized = 0; // To ensure file is created only once per run
+
+    // Only write if new data was received
+    if (data == last_data) {
+        return;
+    }
+
+    last_data = data;
+
+    // Open file in append mode
+    if (f_open(&file, file_name, FA_WRITE | FA_OPEN_APPEND) == FR_OK) {
+        // Write header if first time
+        if (!initialized) {
+            f_write(&file, "Logging height and source:\n", 28, NULL);
+            initialized = 1;
+        }
+
+        // Determine type
+        const char* type_buffer = (data < 1200) ? "ANALOG" : "DIGITAL";
+
+        // Format line: height: <data>, source: <type>
+        char buffer_sent[64];
+        int len = snprintf(buffer_sent, sizeof(buffer_sent), "height: %d, source: %s\n", data, type_buffer);
+
+        f_write(&file, buffer_sent, len, NULL);
+        f_close(&file);
+    } else {
+        xil_printf("Failed to open file: %s\n", file_name);
+    }
+}
+
+////////////////////////////////////////////////////////////////////
+int CheckButtonState() {
+    u8 rx_buffer[8];  // Make sure this is at least 8 bytes
+    int receive_cnt = 0;
+
+    // Send command to request the button state
+    char command[] = "get bt0.val";
+
+    XUartLite_Send(&UartLite, (u8 *)command, strlen(command));
+    while (XUartLite_IsSending(&UartLite));
+
+    // Send termination bytes (0xFF 0xFF 0xFF)
+    u8 end_cmd[3] = {0xFF, 0xFF, 0xFF};
+    XUartLite_Send(&UartLite, end_cmd, sizeof(end_cmd));
+    while (XUartLite_IsSending(&UartLite));
+
+    // Wait for full response: should be exactly 8 bytes
+    while (receive_cnt < 8) {
+        receive_cnt += XUartLite_Recv(&UartLite, &rx_buffer[receive_cnt], 1);
+    }
+
+        // rx_buffer[1] contains the actual value (0x00 or 0x01)
+        if (rx_buffer[1] == 0x01) {
+        	xil_printf("\nbutton is on:\n");
+            return 1;
+        } else {
+        	xil_printf("\nbutton is off\n");
+            return 0;
+        }
+
+}
+
+
+
+
+/////////////////////////////////////////////////////////////////////
+void TransmitData_Nextion(int data_digital) {
+	 // Format the main part of the command
+	    char command_digital[50];
+	    sprintf(command_digital, "digital.val=%d", data_digital);
+
+	    // Check button state before transmitting
+
+	        XUartLite_Send(&UartLite, (u8 *)command_digital, strlen(command_digital));
+	        xil_printf("Sending data to the Nextion: %s\n", command_digital);
+
+	        // Wait for the command to be fully transmitted
+	        while (XUartLite_IsSending(&UartLite));
+
+	        // Send the end of the command
+	        u8 end_cmd[3] = {0xFF, 0xFF, 0xFF};
+	        XUartLite_Send(&UartLite, end_cmd, sizeof(end_cmd));
+
+	        // Wait for the end command to be fully transmitted
+	        while (XUartLite_IsSending(&UartLite));
+
+	        xil_printf("The data is sent.\n");
+	    }
+/////////////////////////////////////////////////////////////////////////
+
+// Function to initialize the AXI UART Lite
+int InitializeUART() {
+    int status = XUartLite_Initialize(&UartLite, UARTLITE_DEVICE_ID);
+    if (status != XST_SUCCESS) {
+        xil_printf("UART initialization failed!\n");
+        return XST_FAILURE;
+    }
+    xil_printf("UART initialized successfully.\n");
+    return XST_SUCCESS;
+}
+////////////////////////////////////////////////////////////////////
+float XADC(void) {
+
+    //xil_printf("\nXAdc function started\n");
+    u16 raw_data, prev_raw_data;
+    static int peak_value = 0;
+    static float voltage, last_voltage_value = 0.0;
+    static float height = 0.0;
+    float VREF = 1.0;
+    int rising = 1;
+    int i=0;
+
+    prev_raw_data = (XAdcPs_GetAdcData(&XAdcInst, VP_VN_CHANNEL) >> 4);
+    peak_value = prev_raw_data;
+
+    while(1) {
+    	if (i==100000)
+    			return height;
+    	raw_data = (XAdcPs_GetAdcData(&XAdcInst, VP_VN_CHANNEL) >> 4);
+    	//xil_printf("raw data: %d\n",raw_data);
+    	        if (rising) {
+    	            if (raw_data > prev_raw_data) {
+    	                peak_value = raw_data;
+
+    	                voltage = ((float)peak_value / 4095.0) * VREF;
+    	            }
+    	            else if (raw_data < (peak_value - HYSTERESIS)) {
+    	                // Only print if peak changed by more than 100 in either direction
+    	                if ((voltage - last_voltage_value> 0.02) || (last_voltage_value - voltage > 0.02)) {
+    	                    printf("Peak Detected -> Raw Data: %d\t Height: %.1f feet Voltage: %.3f V \n",peak_value, height, voltage);
+    	                    height = ((float)raw_data / 4095.0) * 1250;  // Convert to height in feet
+    	                    last_voltage_value = voltage;  // Update last printed peak
+    	                    return height;
+    	                }
+    	                rising = 0;
+    	            }
+    	        }
+    	        else { // Falling edge
+    	            if (raw_data > prev_raw_data + HYSTERESIS) {
+    	                rising = 1;
+    	            }
+    	        }
+
+    	        prev_raw_data = raw_data;
+    	    i++;
+    }
+
+}
+
 
 int main(void)
 {
@@ -136,12 +316,113 @@ int main(void)
 	/* print app header */
 	print_app_header();
 
+
 	/* start the application*/
+
 	start_application();
+
+
+
+////////////////////////////////////////////////////////
+	 // Initialize UART Lite
+	    if (InitializeUART() != XST_SUCCESS) {
+	    	  return XST_FAILURE;
+	    	 }
+
+	    ConfigPtr = XAdcPs_LookupConfig(XADC_DEVICE_ID);
+	    	    if (ConfigPtr == NULL) {
+	    	        print("XADC LookupConfig failed\n\r");
+	    	        return -1;
+	    	    }
+
+	    	    int Status;
+	    	    Status = XAdcPs_CfgInitialize(&XAdcInst, ConfigPtr, ConfigPtr->BaseAddress);
+	    	    if (Status != XST_SUCCESS) {
+	    	        print("XADC Initialization failed\n\r");
+	    	        return -1;
+	    	    }
+
+	    //XADC chanels enable
+	    XAdcPs_SetSequencerMode(&XAdcInst, XADCPS_SEQ_MODE_CONTINPASS);
+	    XAdcPs_SetSeqInputMode(&XAdcInst, XADCPS_SEQ_MODE_SAFE);
+	    XAdcPs_SetSeqChEnables(&XAdcInst, XADCPS_CH_VPVN);
 	xil_printf("\r\n");
+/////////////////////////////////////////////////////////////////////////
+
+
+	f_mount(&fatfs, "0:/", 1);
+
+		    int file_counter = 0;
+		    char file_name[32];
+
+		    // Open or create the counter file to read the counter
+		    f_open(&counter_file, "counter.txt", FA_READ | FA_OPEN_EXISTING);//open file in a read mode
+
+		        char buffer[16]; //buffer to store the content of the text file
+		        UINT bytes_read; //stores the numbre of bytes actually read (necessary for the read function)
+		        f_read(&counter_file, buffer, sizeof(buffer), &bytes_read); //
+		        buffer[bytes_read] = '\0'; // Null-terminate the string (makes sure its a string)
+		        file_counter = atoi(buffer); // Convert the string into integer
+		        f_close(&counter_file);
+
+
+		    // Increment the counter and save it back to the counter file
+		    file_counter++;
+		    if (f_open(&counter_file, "counter.txt", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+		        char buffer[16];
+		        snprintf(buffer, sizeof(buffer), "%d", file_counter);
+		        f_write(&counter_file, buffer, strlen(buffer), NULL);
+		        f_close(&counter_file);
+		    }
+
+		    // Create a new file name based on the updated counter
+		    snprintf(file_name, sizeof(file_name), "data_%d.csv", file_counter);
+
+	int data =0;
+	int analog_data=0;
+	int ButtonState;
 
 	while (1) {
 		xemacif_input(netif);
+
+		usleep(1000);
+
+		analog_data = XADC();
+			Xil_Out32(BRAM_1_BASEADDR, analog_data);
+			if (analog_data > 1200){
+		    data = Xil_In32(BRAM_0_BASEADDR); // Read data from BRAM
+		    usleep(500);
+			}
+			else
+				data = analog_data;
+
+			usleep(1000);
+//check if the button in the Nextion is pressed:
+	    ButtonState = CheckButtonState();
+	    if (ButtonState == 1)
+	    {
+			TransmitData_Nextion(data);
+				  usleep(1000);
+
+				  SDcard(data,file_name);
+				  usleep(1000000);
+
+
+			//char char_arr [100];
+			//sprintf(char_arr, "%d", data);
+				  char char_arr[5]; // 4 chars + null terminator
+				  sprintf(char_arr, "%04d", data); // Pads with leading zeros (e.g. "0005", "0023")
+
+				  char full_msg[50]; // Enough to hold the full formatted message
+
+				  if (data<1200)
+					  sprintf(full_msg, "height: %s Source: Analog", char_arr);
+				  else
+					  sprintf(full_msg, "height: %s Source: Arinc", char_arr);
+
+				  send_udp_packet(full_msg, "192.168.1.5", 5001); // Send the full message
+	    }
+
 	}
 
 	/* never reached */
