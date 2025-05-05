@@ -267,7 +267,11 @@ static void reset_stats(void)
 
 
 void send_udp_packet(const char* data, const char* dest_ip_str, u16_t dest_port) {
+
+	//allocation memory for the udp packet
     struct pbuf *udp_buf = pbuf_alloc(PBUF_TRANSPORT, strlen(data), PBUF_RAM);
+
+    //check if the alloctaion is successful
     if (!udp_buf) {
         xil_printf("Failed to allocate pbuf\n\r");
         return;
@@ -275,6 +279,7 @@ void send_udp_packet(const char* data, const char* dest_ip_str, u16_t dest_port)
 
     memcpy(udp_buf->payload, data, strlen(data));
 
+    //convert the ip from text into ip structure that can be sent to
     ip_addr_t dest_ip;
     if (!inet_aton(dest_ip_str, &dest_ip)) {
         xil_printf("Invalid destination IP\n\r");
@@ -282,11 +287,13 @@ void send_udp_packet(const char* data, const char* dest_ip_str, u16_t dest_port)
         return;
     }
 
+    //sent the packet and check the result
     err_t err = udp_sendto(pcb, udp_buf, &dest_ip, dest_port);
     if (err != ERR_OK) {
         xil_printf("Failed to send UDP packet: %d\n\r", err);
     }
 
+    //free the memory
     pbuf_free(udp_buf);
 }
 
