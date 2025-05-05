@@ -1,63 +1,63 @@
+///standard C libraries
 #include <stdio.h>
+#include <stdlib.h>  // Required for atoi()
+
+// Xilinx platform support libraries
 #include "platform.h"
 #include "xil_printf.h"
 #include "xil_io.h"
 #include "xparameters.h"
-#include "ff.h"
-#include "ctype.h"
-#include "xuartlite.h"
 #include "sleep.h"
+
+//SD card libraries for file handaling
+#include "ff.h"
+
+//XADC libraries
 #include "xadcps.h"
-#include <math.h>
-#include <stdlib.h>  // Required for atoi()
-#include "xtime_l.h"  // Include XTime library
+
+//uartlite libraries
+#include "xuartlite.h"
+
+//lwIP Libraries
 #include "netif/xadapter.h"
 #include "platform_config.h"
 #include "lwipopts.h"
-#include "lwip/priv/tcp_priv.h"
 #include "lwip/init.h"
 #include "lwip/inet.h"
-#include "xil_cache.h"
-#include "lwip/dhcp.h"
 
-
-#include "lwip/dhcp.h"
+// Default static IP configuration
 #define DEFAULT_IP_ADDRESS	"192.168.1.10"
 #define DEFAULT_IP_MASK		"255.255.255.0"
 #define DEFAULT_GW_ADDRESS	"192.168.1.1"
 
-
+//Bram base addresses
 #define BRAM_0_BASEADDR XPAR_AXI_BRAM_CTRL_0_S_AXI_BASEADDR
 #define BRAM_1_BASEADDR XPAR_AXI_BRAM_CTRL_1_S_AXI_BASEADDR
-#define DATA_LENGTH 64  // Number of 32-bit words to read
 
+//XADC configuration
 #define XADC_DEVICE_ID XPAR_XADCPS_0_DEVICE_ID
 #define VP_VN_CHANNEL  XADCPS_CH_VPVN
 #define HYSTERESIS 40
 
+//UARTLite configuration
 #define UARTLITE_DEVICE_ID XPAR_AXI_UARTLITE_0_DEVICE_ID
-//#define GPIO_DEVICE_ID XPAR_AXI_GPIO_0_DEVICE_ID
 
+//Global objects
 XUartLite UartLite;
-//XGpio Gpio;
-
 FATFS fatfs;
 FIL counter_file;
 FIL file;
-
-#define XADC_DEVICE_ID XPAR_XADCPS_0_DEVICE_ID
-#define VP_VN_CHANNEL  XADCPS_CH_VPVN
-#define HYSTERESIS 40
-
 XAdcPs XAdcInst;
 XAdcPs_Config *ConfigPtr;
+
+
 void platform_enable_interrupts(void);
 void start_application(void);
 void print_app_header(void);
 
 #if defined (__arm__) && !defined (ARMR5)
 #if XPAR_GIGE_PCS_PMA_SGMII_CORE_PRESENT == 1 || \
-		 XPAR_GIGE_PCS_PMA_1000BASEX_CORE_PRESENT == 1
+	XPAR_GIGE_PCS_PMA_1000BASEX_CORE_PRESENT == 1
 int ProgramSi5324(void);
 int ProgramSfpPhy(void);
 #endif
@@ -71,6 +71,7 @@ int IicPhyReset(void);
 
 struct netif server_netif;
 
+//print IP address with message
 static void print_ip(char *msg, ip_addr_t *ip)
 {
 	print(msg);
@@ -78,6 +79,8 @@ static void print_ip(char *msg, ip_addr_t *ip)
 			ip4_addr3(ip), ip4_addr4(ip));
 }
 
+
+//print IP settings
 static void print_ip_settings(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
 {
 	print_ip("Board IP:       ", ip);
@@ -85,6 +88,8 @@ static void print_ip_settings(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
 	print_ip("Gateway :       ", gw);
 }
 
+
+// Assign default IP settings to the board
 static void assign_default_ip(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
 {
 	int err;
@@ -107,6 +112,10 @@ static void assign_default_ip(ip_addr_t *ip, ip_addr_t *mask, ip_addr_t *gw)
 
 /////////////////////////////////////////////////////////////////////
 
+///// 	SD card Function
+
+/////////////////////////////////////////////////////////////////////
+
 void SDcard(int data, const char *file_name) {
     static int last_data = -1;  // Keep track of the last data written
     static int initialized = 0; // To ensure file is created only once per run
@@ -126,7 +135,7 @@ void SDcard(int data, const char *file_name) {
             initialized = 1;
         }
 
-        // Determine type
+        // set the type
         const char* type_buffer = (data < 1200) ? "ANALOG" : "DIGITAL";
 
         // Format line: height: <data>, source: <type>
@@ -140,7 +149,12 @@ void SDcard(int data, const char *file_name) {
     }
 }
 
-////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////
+
+///// 	Check Button state Function
+
+/////////////////////////////////////////////////////////////////////
+
 int CheckButtonState() {
     u8 rx_buffer[8];  // Make sure this is at least 8 bytes
     int receive_cnt = 0;
@@ -157,6 +171,7 @@ int CheckButtonState() {
     while (XUartLite_IsSending(&UartLite));
 
     // Wait for full response: should be exactly 8 bytes
+    //unsigned int XUartLite_Recv(XUartLite *InstancePtr, u8 *DataBufferPtr,unsigned int NumBytes)
     while (receive_cnt < 8) {
         receive_cnt += XUartLite_Recv(&UartLite, &rx_buffer[receive_cnt], 1);
     }
@@ -173,7 +188,9 @@ int CheckButtonState() {
 }
 
 
+/////////////////////////////////////////////////////////////////////
 
+///// 	transmit data to Nextion
 
 /////////////////////////////////////////////////////////////////////
 void TransmitData_Nextion(int data_digital) {
@@ -181,7 +198,7 @@ void TransmitData_Nextion(int data_digital) {
 	    char command_digital[50];
 	    sprintf(command_digital, "digital.val=%d", data_digital);
 
-	    // Check button state before transmitting
+	    //int XUartLite_Initialize(XUartLite *InstancePtr, u16 DeviceId);
 
 	        XUartLite_Send(&UartLite, (u8 *)command_digital, strlen(command_digital));
 	        xil_printf("Sending data to the Nextion: %s\n", command_digital);
@@ -198,9 +215,12 @@ void TransmitData_Nextion(int data_digital) {
 
 	        xil_printf("The data is sent.\n");
 	    }
-/////////////////////////////////////////////////////////////////////////
 
-// Function to initialize the AXI UART Lite
+/////////////////////////////////////////////////////////////////////
+
+///// 	initialize uart
+
+/////////////////////////////////////////////////////////////////////
 int InitializeUART() {
     int status = XUartLite_Initialize(&UartLite, UARTLITE_DEVICE_ID);
     if (status != XST_SUCCESS) {
@@ -210,7 +230,13 @@ int InitializeUART() {
     xil_printf("UART initialized successfully.\n");
     return XST_SUCCESS;
 }
-////////////////////////////////////////////////////////////////////
+
+/////////////////////////////////////////////////////////////////////
+
+///// 	XADC function
+
+/////////////////////////////////////////////////////////////////////
+
 float XADC(void) {
 
     //xil_printf("\nXAdc function started\n");
@@ -259,174 +285,174 @@ float XADC(void) {
 
 }
 
+/////////////////////////////////////////////////////////////////////
+
+///// 	Main function
+
+/////////////////////////////////////////////////////////////////////
 
 int main(void)
 {
-	struct netif *netif;
+    struct netif *netif;
 
-	/* the mac address of the board. this should be unique per board */
-	unsigned char mac_ethernet_address[] = {
-		0x00, 0x18, 0x3E, 0x02, 0x78, 0xCF };
+    /* the mac address of the board. this should be unique per board */
+    unsigned char mac_ethernet_address[] = {
+        0x00, 0x18, 0x3E, 0x02, 0x78, 0xCF
+    };
 
-	netif = &server_netif;
+    netif = &server_netif;
+
 #if defined (__arm__) && !defined (ARMR5)
 #if XPAR_GIGE_PCS_PMA_SGMII_CORE_PRESENT == 1 || \
-		XPAR_GIGE_PCS_PMA_1000BASEX_CORE_PRESENT == 1
-	ProgramSi5324();
-	ProgramSfpPhy();
+    XPAR_GIGE_PCS_PMA_1000BASEX_CORE_PRESENT == 1
+    ProgramSi5324();
+    ProgramSfpPhy();
 #endif
 #endif
 
-	/* Define this board specific macro in order perform PHY reset
-	 * on ZCU102
-	 */
 #ifdef XPS_BOARD_ZCU102
-	IicPhyReset();
+    IicPhyReset();
 #endif
 
-	init_platform();
+    init_platform();
 
-	xil_printf("\r\n\r\n");
-	xil_printf("-----lwIP RAW Mode UDP Server Application-----\r\n");
+    xil_printf("\r\n\r\n");
+    xil_printf("-----lwIP RAW Mode UDP Server Application-----\r\n");
 
-	/* initialize lwIP */
-	lwip_init();
+    /* initialize lwIP */
+    lwip_init();
 
-	/* Add network interface to the netif_list, and set it as default */
-	if (!xemac_add(netif, NULL, NULL, NULL, mac_ethernet_address,
-				PLATFORM_EMAC_BASEADDR)) {
-		xil_printf("Error adding N/W interface\r\n");
-		return -1;
-	}
-	netif_set_default(netif);
+    /* Add network interface to the netif_list, and set it as default */
+    if (!xemac_add(netif, NULL, NULL, NULL, mac_ethernet_address,
+                   PLATFORM_EMAC_BASEADDR)) {
+        xil_printf("Error adding N/W interface\r\n");
+        return -1;
+    }
 
-	/* now enable interrupts */
-	platform_enable_interrupts();
+    netif_set_default(netif);
 
-	/* specify that the network if is up */
-	netif_set_up(netif);
+    /* now enable interrupts */
+    platform_enable_interrupts();
 
+    /* specify that the network if is up */
+    netif_set_up(netif);
 
-	/* print IP address, netmask and gateway */
-	assign_default_ip(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
-	print_ip_settings(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
+    /* print IP address, netmask and gateway */
+    assign_default_ip(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
+    print_ip_settings(&(netif->ip_addr), &(netif->netmask), &(netif->gw));
 
-	xil_printf("\r\n");
+    xil_printf("\r\n");
 
-	/* print app header */
-	print_app_header();
+    /* print app header */
+    print_app_header();
 
+    /* start the application */
+    start_application();
 
-	/* start the application*/
+    ////////////////////////////////////////////////////////
+    // Initialize UART Lite
 
-	start_application();
+    if (InitializeUART() != XST_SUCCESS) {
+        return XST_FAILURE;
+    }
 
+    ConfigPtr = XAdcPs_LookupConfig(XADC_DEVICE_ID);
+    if (ConfigPtr == NULL) {
+        print("XADC LookupConfig failed\n\r");
+        return -1;
+    }
 
+    int Status;
+    Status = XAdcPs_CfgInitialize(&XAdcInst, ConfigPtr, ConfigPtr->BaseAddress);
+    if (Status != XST_SUCCESS) {
+        print("XADC Initialization failed\n\r");
+        return -1;
+    }
 
-////////////////////////////////////////////////////////
-	 // Initialize UART Lite
-	    if (InitializeUART() != XST_SUCCESS) {
-	    	  return XST_FAILURE;
-	    	 }
+    // XADC channels enable
+    XAdcPs_SetSequencerMode(&XAdcInst, XADCPS_SEQ_MODE_CONTINPASS);
+    XAdcPs_SetSeqInputMode(&XAdcInst, XADCPS_SEQ_MODE_SAFE);
+    XAdcPs_SetSeqChEnables(&XAdcInst, XADCPS_CH_VPVN);
 
-	    ConfigPtr = XAdcPs_LookupConfig(XADC_DEVICE_ID);
-	    	    if (ConfigPtr == NULL) {
-	    	        print("XADC LookupConfig failed\n\r");
-	    	        return -1;
-	    	    }
+    xil_printf("\r\n");
 
-	    	    int Status;
-	    	    Status = XAdcPs_CfgInitialize(&XAdcInst, ConfigPtr, ConfigPtr->BaseAddress);
-	    	    if (Status != XST_SUCCESS) {
-	    	        print("XADC Initialization failed\n\r");
-	    	        return -1;
-	    	    }
+    /////////////////////////////////////////////////////////////////////////
 
-	    //XADC chanels enable
-	    XAdcPs_SetSequencerMode(&XAdcInst, XADCPS_SEQ_MODE_CONTINPASS);
-	    XAdcPs_SetSeqInputMode(&XAdcInst, XADCPS_SEQ_MODE_SAFE);
-	    XAdcPs_SetSeqChEnables(&XAdcInst, XADCPS_CH_VPVN);
-	xil_printf("\r\n");
-/////////////////////////////////////////////////////////////////////////
+    f_mount(&fatfs, "0:/", 1);
 
+    int file_counter = 0;
+    char file_name[32];
 
-	f_mount(&fatfs, "0:/", 1);
+    // Open or create the counter file to read the counter
+    f_open(&counter_file, "counter.txt", FA_READ | FA_OPEN_EXISTING);
 
-		    int file_counter = 0;
-		    char file_name[32];
+    char buffer[16];
+    UINT bytes_read;
+    f_read(&counter_file, buffer, sizeof(buffer), &bytes_read);
+    buffer[bytes_read] = '\0';
+    file_counter = atoi(buffer);
+    f_close(&counter_file);
 
-		    // Open or create the counter file to read the counter
-		    f_open(&counter_file, "counter.txt", FA_READ | FA_OPEN_EXISTING);//open file in a read mode
+    // Increment the counter and save it back to the counter file
+    file_counter++;
+    if (f_open(&counter_file, "counter.txt", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "%d", file_counter);
+        f_write(&counter_file, buffer, strlen(buffer), NULL);
+        f_close(&counter_file);
+    }
 
-		        char buffer[16]; //buffer to store the content of the text file
-		        UINT bytes_read; //stores the numbre of bytes actually read (necessary for the read function)
-		        f_read(&counter_file, buffer, sizeof(buffer), &bytes_read); //
-		        buffer[bytes_read] = '\0'; // Null-terminate the string (makes sure its a string)
-		        file_counter = atoi(buffer); // Convert the string into integer
-		        f_close(&counter_file);
+    // Create a new file name based on the updated counter
+    snprintf(file_name, sizeof(file_name), "data_%d.csv", file_counter);
 
+    int data = 0;
+    int analog_data = 0;
+    int ButtonState;
 
-		    // Increment the counter and save it back to the counter file
-		    file_counter++;
-		    if (f_open(&counter_file, "counter.txt", FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
-		        char buffer[16];
-		        snprintf(buffer, sizeof(buffer), "%d", file_counter);
-		        f_write(&counter_file, buffer, strlen(buffer), NULL);
-		        f_close(&counter_file);
-		    }
+    while (1) {
+        xemacif_input(netif);
 
-		    // Create a new file name based on the updated counter
-		    snprintf(file_name, sizeof(file_name), "data_%d.csv", file_counter);
+        usleep(1000);
 
-	int data =0;
-	int analog_data=0;
-	int ButtonState;
+        analog_data = XADC();
+        Xil_Out32(BRAM_1_BASEADDR, analog_data);
 
-	while (1) {
-		xemacif_input(netif);
+        if (analog_data > 1200) {
+            data = Xil_In32(BRAM_0_BASEADDR); // Read data from BRAM
+            usleep(500);
+        } else {
+            data = analog_data;
+        }
 
-		usleep(1000);
+        usleep(1000);
 
-		analog_data = XADC();
-			Xil_Out32(BRAM_1_BASEADDR, analog_data);
-			if (analog_data > 1200){
-		    data = Xil_In32(BRAM_0_BASEADDR); // Read data from BRAM
-		    usleep(500);
-			}
-			else
-				data = analog_data;
+        // check if the button in the Nextion is pressed:
+        ButtonState = CheckButtonState();
+        if (ButtonState == 1) {
+            TransmitData_Nextion(data);
+            usleep(1000);
 
-			usleep(1000);
-//check if the button in the Nextion is pressed:
-	    ButtonState = CheckButtonState();
-	    if (ButtonState == 1)
-	    {
-			TransmitData_Nextion(data);
-				  usleep(1000);
+            SDcard(data, file_name);
+            usleep(1000000);
 
-				  SDcard(data,file_name);
-				  usleep(1000000);
+            // char char_arr [100];
+            // sprintf(char_arr, "%d", data);
+            char char_arr[5]; // 4 chars + null terminator
+            sprintf(char_arr, "%04d", data); // Pads with leading zeros
 
+            char full_msg[50]; // Enough to hold the full formatted message
 
-			//char char_arr [100];
-			//sprintf(char_arr, "%d", data);
-				  char char_arr[5]; // 4 chars + null terminator
-				  sprintf(char_arr, "%04d", data); // Pads with leading zeros (e.g. "0005", "0023")
+            if (data < 1200)
+                sprintf(full_msg, "height: %s Source: Analog", char_arr);
+            else
+                sprintf(full_msg, "height: %s Source: Arinc", char_arr);
 
-				  char full_msg[50]; // Enough to hold the full formatted message
+            send_udp_packet(full_msg, "192.168.1.5", 5001); // Send the full message
+        }
+    }
 
-				  if (data<1200)
-					  sprintf(full_msg, "height: %s Source: Analog", char_arr);
-				  else
-					  sprintf(full_msg, "height: %s Source: Arinc", char_arr);
+    /* never reached */
+    cleanup_platform();
 
-				  send_udp_packet(full_msg, "192.168.1.5", 5001); // Send the full message
-	    }
-
-	}
-
-	/* never reached */
-	cleanup_platform();
-
-	return 0;
+    return 0;
 }
